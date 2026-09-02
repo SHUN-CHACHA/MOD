@@ -1,0 +1,281 @@
+package dev.shuncha.headfirework;
+
+import com.mojang.brigadier.arguments.FloatArgumentType;
+import com.mojang.brigadier.arguments.IntegerArgumentType;
+import com.mojang.brigadier.arguments.StringArgumentType;
+import com.mojang.math.Transformation;
+import net.fabricmc.api.ModInitializer;
+import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerEntityEvents;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.commands.Commands;
+import net.minecraft.commands.SharedSuggestionProvider;
+import net.minecraft.core.Registry;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.NbtOps;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.util.Mth;
+import net.minecraft.util.ProblemReporter;
+import net.minecraft.world.entity.Display;
+import net.minecraft.world.entity.EntitySpawnReason;
+import net.minecraft.world.entity.EntityTypes;
+import net.minecraft.world.entity.projectile.FireworkRocketEntity;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.component.FireworkExplosion;
+import net.minecraft.world.item.component.Fireworks;
+import net.minecraft.world.item.component.ResolvableProfile;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.storage.TagValueInput;
+import net.minecraft.world.level.storage.ValueInput;
+import org.joml.Quaternionf;
+import org.joml.Vector3f;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.Iterator;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+
+public class HeadFireworkMod implements ModInitializer {
+    public static final Logger LOGGER = LoggerFactory.getLogger("headfirework");
+    public static final String MOD_ID = "headfirework";
+
+    private static final Map<Integer, FireworkRocketEntity> watchedRockets = new ConcurrentHashMap<>();
+    private static final Map<Display.ItemDisplay, Integer> activeHeadDisplays = new ConcurrentHashMap<>();
+    private static final Map<UUID, HeadAnimation> animatingHeads = new ConcurrentHashMap<>();
+
+    private record HeadAnimation(Display.ItemDisplay display, ServerLevel serverLevel, ItemStack headStack,
+                                   double posX, double posY, double posZ,
+                                   float targetScale, int startTick, int durationTicks) {}
+
+    @Override
+    public void onInitialize() {
+        LOGGER.info("HeadFirework (26.2) skeleton loaded.");
+
+        Registry.register(
+                BuiltInRegistries.RECIPE_SERIALIZER,
+                Identifier.fromNamespaceAndPath(MOD_ID, "crafting_player_head_firework_star"),
+                PlayerHeadFireworkStarRecipe.SERIALIZER
+        );
+
+        Registry.register(
+                BuiltInRegistries.RECIPE_SERIALIZER,
+                Identifier.fromNamespaceAndPath(MOD_ID, "crafting_player_head_firework_rocket"),
+                PlayerHeadFireworkRocketRecipe.SERIALIZER
+        );
+
+        ServerEntityEvents.ENTITY_LOAD.register((entity, level) -> {
+            if (entity instanceof FireworkRocketEntity rocket) {
+                watchedRockets.put(rocket.getId(), rocket);
+            }
+        });
+
+        ServerTickEvents.END_SERVER_TICK.register(this::onServerTick);
+
+        CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) ->
+                registerCommands(dispatcher));
+    }
+
+    private void registerCommands(com.mojang.brigadier.CommandDispatcher<CommandSourceStack> dispatcher) {
+        dispatcher.register(Commands.literal("headfirework")
+                .then(Commands.literal("config")
+                        .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
+                        .then(Commands.literal("scale")
+                                .then(Commands.argument("shape", StringArgumentType.word())
+                                        .suggests((ctx, builder) -> SharedSuggestionProvider.suggest(
+                                                new String[]{"small_ball", "large_ball", "star", "creeper", "burst"}, builder))
+                                        .then(Commands.argument("value", FloatArgumentType.floatArg(0.1f, 50.0f))
+                                                .executes(ctx -> {
+                                                    String shapeArg = StringArgumentType.getString(ctx, "shape");
+                                                    float value = FloatArgumentType.getFloat(ctx, "value");
+                                                    HeadFireworkConfig cfg = HeadFireworkConfig.INSTANCE;
+                                                    switch (shapeArg) {
+                                                        case "small_ball" -> cfg.scaleSmallBall = value;
+                                                        case "large_ball" -> cfg.scaleLargeBall = value;
+                                                        case "star" -> cfg.scaleStar = value;
+                                                        case "creeper" -> cfg.scaleCreeper = value;
+                                                        case "burst" -> cfg.scaleBurst = value;
+                                                        default -> {
+                                                            ctx.getSource().sendFailure(Component.literal("不明な形状: " + shapeArg));
+                                                            return 0;
+                                                        }
+                                                    }
+                                                    cfg.save();
+                                                    ctx.getSource().sendSuccess(() ->
+                                                            Component.literal(shapeArg + " のサイズを " + value + " に変更しました"), true);
+                                                    return 1;
+                                                }))))
+                        .then(Commands.literal("display_duration")
+                                .then(Commands.argument("ticks", IntegerArgumentType.integer(1, 1200))
+                                        .executes(ctx -> {
+                                            int ticks = IntegerArgumentType.getInteger(ctx, "ticks");
+                                            HeadFireworkConfig.INSTANCE.displayDurationTicks = ticks;
+                                            HeadFireworkConfig.INSTANCE.save();
+                                            ctx.getSource().sendSuccess(() ->
+                                                    Component.literal("表示時間を " + ticks + " tick に変更しました"), true);
+                                            return 1;
+                                        })))
+                        .then(Commands.literal("animation_duration")
+                                .then(Commands.argument("ticks", IntegerArgumentType.integer(0, 200))
+                                        .executes(ctx -> {
+                                            int ticks = IntegerArgumentType.getInteger(ctx, "ticks");
+                                            HeadFireworkConfig.INSTANCE.animationDurationTicks = ticks;
+                                            HeadFireworkConfig.INSTANCE.save();
+                                            ctx.getSource().sendSuccess(() ->
+                                                    Component.literal("アニメーション時間を " + ticks + " tick に変更しました"), true);
+                                            return 1;
+                                        })))
+                        .then(Commands.literal("show")
+                                .executes(ctx -> {
+                                    HeadFireworkConfig cfg = HeadFireworkConfig.INSTANCE;
+                                    ctx.getSource().sendSuccess(() -> Component.literal(
+                                            "small_ball=%.1f large_ball=%.1f star=%.1f creeper=%.1f burst=%.1f display=%d anim=%d"
+                                                    .formatted(cfg.scaleSmallBall, cfg.scaleLargeBall, cfg.scaleStar,
+                                                            cfg.scaleCreeper, cfg.scaleBurst,
+                                                            cfg.displayDurationTicks, cfg.animationDurationTicks)), false);
+                                    return 1;
+                                }))));
+    }
+
+    private void onServerTick(MinecraftServer server) {
+        if (!watchedRockets.isEmpty()) {
+            Iterator<Map.Entry<Integer, FireworkRocketEntity>> it = watchedRockets.entrySet().iterator();
+            while (it.hasNext()) {
+                Map.Entry<Integer, FireworkRocketEntity> entry = it.next();
+                FireworkRocketEntity rocket = entry.getValue();
+                if (rocket.isRemoved()) {
+                    onFireworkExploded(rocket, server);
+                    it.remove();
+                }
+            }
+        }
+
+        if (!activeHeadDisplays.isEmpty()) {
+            int currentTick = server.getTickCount();
+            Iterator<Map.Entry<Display.ItemDisplay, Integer>> it = activeHeadDisplays.entrySet().iterator();
+            while (it.hasNext()) {
+                Map.Entry<Display.ItemDisplay, Integer> entry = it.next();
+                if (currentTick >= entry.getValue()) {
+                    entry.getKey().discard();
+                    it.remove();
+                }
+            }
+        }
+
+        if (!animatingHeads.isEmpty()) {
+            int currentTick = server.getTickCount();
+            Iterator<Map.Entry<UUID, HeadAnimation>> it = animatingHeads.entrySet().iterator();
+            while (it.hasNext()) {
+                Map.Entry<UUID, HeadAnimation> entry = it.next();
+                HeadAnimation anim = entry.getValue();
+
+                if (anim.display().isRemoved()) {
+                    it.remove();
+                    continue;
+                }
+
+                int elapsed = currentTick - anim.startTick();
+                float scale;
+                boolean finished = anim.durationTicks() <= 0 || elapsed >= anim.durationTicks();
+                if (finished) {
+                    scale = anim.targetScale();
+                } else {
+                    float progress = (float) elapsed / anim.durationTicks();
+                    float startScale = anim.targetScale() * HeadFireworkConfig.INSTANCE.animationStartRatio;
+                    scale = Mth.lerp(progress, startScale, anim.targetScale());
+                }
+
+                // load()は座標・アイテムも巻き戻すため、毎tick全て再適用する
+                setHeadTransformation(anim.display(), anim.serverLevel(), scale);
+                anim.display().setPos(anim.posX(), anim.posY(), anim.posZ());
+                anim.display().getSlot(0).set(anim.headStack());
+
+                if (finished) {
+                    it.remove();
+                }
+            }
+        }
+    }
+
+    private static void setHeadTransformation(Display.ItemDisplay display, ServerLevel serverLevel, float scale) {
+        Transformation transformation = new Transformation(
+                new Vector3f(0f, 0f, 0f),
+                new Quaternionf(),
+                new Vector3f(scale, scale, scale),
+                new Quaternionf()
+        );
+        CompoundTag transformTag = (CompoundTag) Transformation.EXTENDED_CODEC
+                .encodeStart(NbtOps.INSTANCE, transformation)
+                .getOrThrow();
+        CompoundTag rootTag = new CompoundTag();
+        rootTag.put("transformation", transformTag);
+        ValueInput input = TagValueInput.create(ProblemReporter.DISCARDING, serverLevel.registryAccess(), rootTag);
+        display.load(input);
+    }
+
+    private void onFireworkExploded(FireworkRocketEntity rocket, MinecraftServer server) {
+        ItemStack fireworkStack = rocket.getItem();
+        ResolvableProfile profile = fireworkStack.get(DataComponents.PROFILE);
+        if (profile == null) {
+            return;
+        }
+
+        // ロケットにはFIREWORK_EXPLOSIONではなくFIREWORKS(飛翔時間+爆発リスト)が入っている
+        FireworkExplosion.Shape shape = FireworkExplosion.Shape.SMALL_BALL;
+        Fireworks fireworks = fireworkStack.get(DataComponents.FIREWORKS);
+        if (fireworks != null && !fireworks.explosions().isEmpty()) {
+            shape = fireworks.explosions().get(0).shape();
+        }
+
+        Level level = rocket.level();
+        if (!(level instanceof ServerLevel serverLevel)) {
+            return;
+        }
+
+        Display.ItemDisplay display = EntityTypes.ITEM_DISPLAY.create(serverLevel, EntitySpawnReason.TRIGGERED);
+        if (display == null) {
+            LOGGER.warn("HeadFirework: failed to create ItemDisplay entity.");
+            return;
+        }
+
+        double posX = rocket.getX();
+        double posY = rocket.getY();
+        double posZ = rocket.getZ();
+
+        HeadFireworkConfig cfg = HeadFireworkConfig.INSTANCE;
+        float targetScale = cfg.scaleForShape(shape);
+        LOGGER.info("HeadFirework: shape={}, targetScale={}, configLargeBall={}",
+                shape, targetScale, cfg.scaleLargeBall);
+        float startScale = targetScale * cfg.animationStartRatio;
+
+        // load()が内部で座標・アイテムをリセットするため、先にtransformationを適用する(開始サイズで)
+        setHeadTransformation(display, serverLevel, startScale);
+
+        // load()の後にsetPos()を呼ぶことで、正しい座標を確実に反映させる
+        display.setPos(posX, posY, posZ);
+
+        ItemStack headStack = new ItemStack(Items.PLAYER_HEAD);
+        headStack.set(DataComponents.PROFILE, profile);
+        display.getSlot(0).set(headStack);
+
+        serverLevel.addFreshEntity(display);
+        activeHeadDisplays.put(display, server.getTickCount() + cfg.displayDurationTicks);
+
+        animatingHeads.put(display.getUUID(),
+                new HeadAnimation(display, serverLevel, headStack, posX, posY, posZ,
+                        targetScale, server.getTickCount(), cfg.animationDurationTicks));
+
+        LOGGER.info(
+            "HeadFirework: displaying head at {}, {}, {}",
+            rocket.getX(), rocket.getY(), rocket.getZ()
+        );
+    }
+}
