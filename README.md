@@ -198,7 +198,7 @@ Mojang公式マッピング(非難読化)のため、1.20.4時代のYarnマッ�
 ## 8. ビルド方法
 
 ```
-cd "path\to\headfirework-262"
+cd path\to\headfirework-262
 .\gradlew.bat build
 ```
 成功すると `build/libs/` にjarファイルが生成されます。`gradle.properties` の `org.gradle.java.home` でJDK25のパスを固定しているため、通常は事前のPATH切り替え作業は不要です。
