@@ -3,6 +3,7 @@ package dev.shuncha.headfirework;
 import com.mojang.serialization.MapCodec;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.ints.IntList;
+import net.minecraft.core.NonNullList;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
@@ -16,6 +17,8 @@ import net.minecraft.world.item.crafting.CraftingInput;
 import net.minecraft.world.item.crafting.CustomRecipe;
 import net.minecraft.world.item.crafting.RecipeSerializer;
 import net.minecraft.world.level.Level;
+
+import java.util.Objects;
 
 public class PlayerHeadFireworkStarRecipe extends CustomRecipe {
 
@@ -37,6 +40,7 @@ public class PlayerHeadFireworkStarRecipe extends CustomRecipe {
         int glowstoneDust = 0;
         int diamond = 0;
         int other = 0;
+        String headName = null;
 
         for (ItemStack stack : input.items()) {
             if (stack.isEmpty()) {
@@ -46,6 +50,14 @@ public class PlayerHeadFireworkStarRecipe extends CustomRecipe {
             if (stack.is(Items.GUNPOWDER)) {
                 gunpowder += stack.getCount();
             } else if (stack.is(Items.PLAYER_HEAD) && stack.has(DataComponents.PROFILE)) {
+                ResolvableProfile profile = stack.get(DataComponents.PROFILE);
+                String name = profileName(profile);
+                if (headName == null) {
+                    headName = name;
+                } else if (!Objects.equals(headName, name)) {
+                    // 違うプレイヤーの頭が混ざっている場合はレシピ不成立
+                    return false;
+                }
                 head += stack.getCount();
             } else if (stack.has(DataComponents.DYE)) {
                 dye += stack.getCount();
@@ -67,7 +79,8 @@ public class PlayerHeadFireworkStarRecipe extends CustomRecipe {
         int shapeItems = fireCharge + feather + goldNugget;
 
         return gunpowder == 1
-                && head == 1
+                && head >= 1
+                && headName != null
                 && dye >= 1 && dye <= 8
                 && shapeItems <= 1
                 && glowstoneDust <= 1
@@ -78,6 +91,7 @@ public class PlayerHeadFireworkStarRecipe extends CustomRecipe {
     @Override
     public ItemStack assemble(CraftingInput input) {
         ItemStack headStack = ItemStack.EMPTY;
+        int headCount = 0;
         IntList colors = new IntArrayList();
         boolean hasFireCharge = false;
         boolean hasFeather = false;
@@ -91,7 +105,10 @@ public class PlayerHeadFireworkStarRecipe extends CustomRecipe {
             }
 
             if (stack.is(Items.PLAYER_HEAD)) {
-                headStack = stack;
+                if (headStack.isEmpty()) {
+                    headStack = stack;
+                }
+                headCount += stack.getCount();
             } else if (stack.has(DataComponents.DYE)) {
                 DyeColor color = stack.get(DataComponents.DYE);
                 if (color != null) {
@@ -123,7 +140,8 @@ public class PlayerHeadFireworkStarRecipe extends CustomRecipe {
             shape = FireworkExplosion.Shape.SMALL_BALL;
         }
 
-        ItemStack result = new ItemStack(Items.FIREWORK_STAR);
+        // 投入したヘッドの個数分だけ星を生成する
+        ItemStack result = new ItemStack(Items.FIREWORK_STAR, Math.max(headCount, 1));
 
         result.set(DataComponents.FIREWORK_EXPLOSION, new FireworkExplosion(
                 shape,
@@ -140,6 +158,25 @@ public class PlayerHeadFireworkStarRecipe extends CustomRecipe {
         }
 
         return result;
+    }
+
+    @Override
+    public NonNullList<ItemStack> getRemainingItems(CraftingInput input) {
+        // プレイヤーヘッドはクラフト後も消費せずグリッドに残す
+        // (バニラの処理は「1個decrement→remainingを加算」の順で動くため、
+        //  ここで返すのは必ず個数1にする。元の個数をそのまま返すと二重加算されて増えてしまう)
+        NonNullList<ItemStack> remaining = NonNullList.withSize(input.size(), ItemStack.EMPTY);
+        for (int i = 0; i < input.size(); i++) {
+            ItemStack stack = input.getItem(i);
+            if (stack.is(Items.PLAYER_HEAD) && stack.has(DataComponents.PROFILE)) {
+                remaining.set(i, stack.copyWithCount(1));
+            }
+        }
+        return remaining;
+    }
+
+    private static String profileName(ResolvableProfile profile) {
+        return profile == null ? null : profile.name().orElse(null);
     }
 
     static String buildFireworkName(ResolvableProfile profile) {
