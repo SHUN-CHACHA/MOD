@@ -23,6 +23,7 @@ public class FireworkRocketRecipeMixin {
         for (ItemStack stack : input.items()) {
             if (stack.is(Items.FIREWORK_STAR) && stack.has(DataComponents.PROFILE)) {
                 cir.setReturnValue(false);
+                cir.cancel();
                 return;
             }
         }
