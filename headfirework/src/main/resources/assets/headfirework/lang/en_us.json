@@ -1,0 +1,18 @@
+{
+  "key.categories.headfirework.main": "HeadFirework",
+  "key.headfirework.open_config": "Open Config Menu",
+  "screen.headfirework.config.title": "HeadFirework Settings",
+  "screen.headfirework.config.small_ball_value": "Small Ball: %s",
+  "screen.headfirework.config.large_ball_value": "Large Ball: %s",
+  "screen.headfirework.config.star_value": "Star/Burst: %s",
+  "screen.headfirework.config.display_duration_value": "Display Duration: %s ticks",
+  "screen.headfirework.config.fade_duration_value": "Fade Duration: %s ticks",
+  "screen.headfirework.config.reset": "R",
+  "screen.headfirework.config.apply": "Apply",
+  "screen.headfirework.config.cancel": "Cancel",
+  "command.headfirework.unknown_shape": "Unknown shape: %s",
+  "command.headfirework.scale_changed": "Changed %s size to %s",
+  "command.headfirework.display_duration_changed": "Changed display duration to %s ticks",
+  "command.headfirework.animation_duration_changed": "Changed animation duration to %s ticks",
+  "command.headfirework.fade_duration_changed": "Changed fade duration to %s ticks"
+}
