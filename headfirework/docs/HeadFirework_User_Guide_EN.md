@@ -21,7 +21,7 @@ Combine the following in a crafting table (shapeless — any arrangement works):
 |---|---|---|
 | Gunpowder | Required | Base ingredient |
 | Dye (one or more) | Required | Sets the firework's color(s). Using multiple dyes creates a multi-color explosion |
-| Player Head (with owner data) | Required | The face that will appear in the explosion |
+| Player Head (with owner data) | Required | The face that will appear in the explosion. Multiple heads from the same player can be added at once (the heads aren't consumed) |
 | Fire Charge **or** Feather **or** Gold Nugget | Optional — pick **one** | Fire Charge → Large Ball shape · Feather → Star shape · Gold Nugget → Burst shape |
 | Diamond | Optional | Adds a twinkle (sparkle) effect |
 | Glowstone Dust | Optional | Adds a trail effect |
@@ -34,8 +34,8 @@ The player head must already have owner (skin) data attached — for example, on
 
 Combine in a crafting table (shapeless):
 
-- The Player Head Firework Star (from step 1)
-- Paper
+- The Player Head Firework Star (from step 1) — multiple stars from the same player can be combined at once, requiring the same number of Paper
+- Paper (same count as the stars used)
 - Gunpowder (1–3)
 
 The number of gunpowder used controls flight duration, same as a vanilla firework rocket (1 = short flight, 3 = long flight).
@@ -49,6 +49,8 @@ The number of gunpowder used controls flight duration, same as a vanilla firewor
 5. Near the end of the display duration, it **shrinks back down to nothing** (a fade-out effect achieved via scale, since item displays don't support transparency).
 
 The display size depends on the firework's shape (Small Ball, Large Ball, Star, Creeper, Burst) and can be tuned — see below.
+
+The direction the face is looking (North / South / East / West) can also be set via the command or GUI below.
 
 The firework star and rocket are automatically named after the player whose head was used (e.g. "Steve's Firework"). If the head has no owner name, it's labeled as an unnamed player's firework.
 
@@ -64,7 +66,11 @@ Press **Ctrl+J** to open the HeadFirework settings screen. From here you can adj
 - Display duration (in ticks)
 - Fade-out duration (in ticks)
 
-Each slider has its own **R** (reset) button next to it, which resets only that value to its default — other values you've changed stay as they are. Click **Apply** to send the changes to the server (works on multiplayer too, since it sends the same commands the server already understands — no client-side mod needed on the server's other players).
+Each slider has its own **R** (reset) button next to it, which resets only that value to its default — other values you've changed stay as they are.
+
+Below the sliders is a "Facing direction" button — each click cycles through North → East → South → West.
+
+Click **Apply** to send the changes to the server (works on multiplayer too, since it sends the same commands the server already understands — no client-side mod needed on the server's other players).
 
 ### Commands (require operator/gamemaster permission)
 
@@ -73,6 +79,7 @@ Each slider has its own **R** (reset) button next to it, which resets only that 
 /headfirework config display_duration <ticks>
 /headfirework config animation_duration <ticks>
 /headfirework config fade_duration <ticks>
+/headfirework config facing <north|south|east|west>
 /headfirework config show
 ```
 
@@ -80,6 +87,7 @@ Each slider has its own **R** (reset) button next to it, which resets only that 
 - `display_duration` — total time (in ticks, 20 ticks = 1 second) the face stays visible, including grow-in and fade-out
 - `animation_duration` — how long the grow-in animation takes
 - `fade_duration` — how long the shrink/fade-out takes, counted from the end of `display_duration`
+- `facing` — sets which direction the face looks (North / South / East / West)
 - `show` — prints the current settings
 
 Settings are saved to `config/headfirework.json` and persist across restarts.
@@ -95,4 +103,4 @@ The mod automatically follows Minecraft's own language setting (Options → Lang
 
 ## Version
 
-This guide corresponds to **HeadFirework v1.1.0**.
+This guide corresponds to **HeadFirework v1.1.2**.
