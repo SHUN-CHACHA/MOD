@@ -49,12 +49,22 @@ public class HeadFireworkMod implements ModInitializer {
     public static final String MOD_ID = "headfirework";
 
     private static final Map<Integer, FireworkRocketEntity> watchedRockets = new ConcurrentHashMap<>();
-    private static final Map<Display.ItemDisplay, Integer> activeHeadDisplays = new ConcurrentHashMap<>();
     private static final Map<UUID, HeadAnimation> animatingHeads = new ConcurrentHashMap<>();
 
+    // 拡大(grow) → 維持(hold) → 縮小フェードアウト(fade) → 消滅、を1本のタイムラインで管理する
     private record HeadAnimation(Display.ItemDisplay display, ServerLevel serverLevel, ItemStack headStack,
                                    double posX, double posY, double posZ,
-                                   float targetScale, int startTick, int durationTicks) {}
+                                   float targetScale, float yawDegrees, int startTick,
+                                   int growDurationTicks, int holdDurationTicks, int fadeDurationTicks) {
+
+        int fadeStartTick() {
+            return startTick + growDurationTicks + holdDurationTicks;
+        }
+
+        int endTick() {
+            return fadeStartTick() + fadeDurationTicks;
+        }
+    }
 
     @Override
     public void onInitialize() {
@@ -133,14 +143,49 @@ public class HeadFireworkMod implements ModInitializer {
                                                     Component.literal("アニメーション時間を " + ticks + " tick に変更しました"), true);
                                             return 1;
                                         })))
+                        .then(Commands.literal("fade_duration")
+                                .then(Commands.argument("ticks", IntegerArgumentType.integer(0, 200))
+                                        .executes(ctx -> {
+                                            int ticks = IntegerArgumentType.getInteger(ctx, "ticks");
+                                            HeadFireworkConfig.INSTANCE.fadeDurationTicks = ticks;
+                                            HeadFireworkConfig.INSTANCE.save();
+                                            ctx.getSource().sendSuccess(() ->
+                                                    Component.literal("フェードアウト時間を " + ticks + " tick に変更しました"), true);
+                                            return 1;
+                                        })))
+                        .then(Commands.literal("facing")
+                                .then(Commands.argument("direction", StringArgumentType.word())
+                                        .suggests((ctx, builder) -> SharedSuggestionProvider.suggest(
+                                                HeadFireworkConfig.VALID_FACINGS, builder))
+                                        .executes(ctx -> {
+                                            String direction = StringArgumentType.getString(ctx, "direction");
+                                            boolean valid = false;
+                                            for (String f : HeadFireworkConfig.VALID_FACINGS) {
+                                                if (f.equals(direction)) {
+                                                    valid = true;
+                                                    break;
+                                                }
+                                            }
+                                            if (!valid) {
+                                                ctx.getSource().sendFailure(Component.literal(
+                                                        "不明な方角: " + direction + " (north/south/east/west)"));
+                                                return 0;
+                                            }
+                                            HeadFireworkConfig.INSTANCE.facing = direction;
+                                            HeadFireworkConfig.INSTANCE.save();
+                                            ctx.getSource().sendSuccess(() ->
+                                                    Component.literal("顔の向きを " + direction + " に変更しました"), true);
+                                            return 1;
+                                        })))
                         .then(Commands.literal("show")
                                 .executes(ctx -> {
                                     HeadFireworkConfig cfg = HeadFireworkConfig.INSTANCE;
                                     ctx.getSource().sendSuccess(() -> Component.literal(
-                                            "small_ball=%.1f large_ball=%.1f star=%.1f creeper=%.1f burst=%.1f display=%d anim=%d"
+                                            "small_ball=%.1f large_ball=%.1f star=%.1f creeper=%.1f burst=%.1f display=%d fade=%d anim=%d facing=%s"
                                                     .formatted(cfg.scaleSmallBall, cfg.scaleLargeBall, cfg.scaleStar,
                                                             cfg.scaleCreeper, cfg.scaleBurst,
-                                                            cfg.displayDurationTicks, cfg.animationDurationTicks)), false);
+                                                            cfg.displayDurationTicks, cfg.fadeDurationTicks,
+                                                            cfg.animationDurationTicks, cfg.facing)), false);
                                     return 1;
                                 }))));
     }
@@ -153,18 +198,6 @@ public class HeadFireworkMod implements ModInitializer {
                 FireworkRocketEntity rocket = entry.getValue();
                 if (rocket.isRemoved()) {
                     onFireworkExploded(rocket, server);
-                    it.remove();
-                }
-            }
-        }
-
-        if (!activeHeadDisplays.isEmpty()) {
-            int currentTick = server.getTickCount();
-            Iterator<Map.Entry<Display.ItemDisplay, Integer>> it = activeHeadDisplays.entrySet().iterator();
-            while (it.hasNext()) {
-                Map.Entry<Display.ItemDisplay, Integer> entry = it.next();
-                if (currentTick >= entry.getValue()) {
-                    entry.getKey().discard();
                     it.remove();
                 }
             }
@@ -184,31 +217,53 @@ public class HeadFireworkMod implements ModInitializer {
 
                 int elapsed = currentTick - anim.startTick();
                 float scale;
-                boolean finished = anim.durationTicks() <= 0 || elapsed >= anim.durationTicks();
-                if (finished) {
+                boolean finished = false;
+
+                if (elapsed < anim.growDurationTicks()) {
+                    // 拡大フェーズ
+                    if (anim.growDurationTicks() <= 0) {
+                        scale = anim.targetScale();
+                    } else {
+                        float progress = (float) elapsed / anim.growDurationTicks();
+                        float startScale = anim.targetScale() * HeadFireworkConfig.INSTANCE.animationStartRatio;
+                        scale = Mth.lerp(progress, startScale, anim.targetScale());
+                    }
+                } else if (currentTick < anim.fadeStartTick()) {
+                    // 維持(hold)フェーズ
                     scale = anim.targetScale();
+                } else if (currentTick < anim.endTick()) {
+                    // 縮小フェードアウトフェーズ
+                    int fadeElapsed = currentTick - anim.fadeStartTick();
+                    if (anim.fadeDurationTicks() <= 0) {
+                        scale = 0f;
+                    } else {
+                        float progress = (float) fadeElapsed / anim.fadeDurationTicks();
+                        scale = Mth.lerp(progress, anim.targetScale(), 0f);
+                    }
                 } else {
-                    float progress = (float) elapsed / anim.durationTicks();
-                    float startScale = anim.targetScale() * HeadFireworkConfig.INSTANCE.animationStartRatio;
-                    scale = Mth.lerp(progress, startScale, anim.targetScale());
+                    // 消滅
+                    scale = 0f;
+                    finished = true;
                 }
 
                 // load()は座標・アイテムも巻き戻すため、毎tick全て再適用する
-                setHeadTransformation(anim.display(), anim.serverLevel(), scale);
+                setHeadTransformation(anim.display(), anim.serverLevel(), scale, anim.yawDegrees());
                 anim.display().setPos(anim.posX(), anim.posY(), anim.posZ());
                 anim.display().getSlot(0).set(anim.headStack());
 
                 if (finished) {
+                    anim.display().discard();
                     it.remove();
                 }
             }
         }
     }
 
-    private static void setHeadTransformation(Display.ItemDisplay display, ServerLevel serverLevel, float scale) {
+    private static void setHeadTransformation(Display.ItemDisplay display, ServerLevel serverLevel, float scale, float yawDegrees) {
+        Quaternionf leftRotation = new Quaternionf().rotateY((float) Math.toRadians(yawDegrees));
         Transformation transformation = new Transformation(
                 new Vector3f(0f, 0f, 0f),
-                new Quaternionf(),
+                leftRotation,
                 new Vector3f(scale, scale, scale),
                 new Quaternionf()
         );
@@ -252,12 +307,12 @@ public class HeadFireworkMod implements ModInitializer {
 
         HeadFireworkConfig cfg = HeadFireworkConfig.INSTANCE;
         float targetScale = cfg.scaleForShape(shape);
-        LOGGER.info("HeadFirework: shape={}, targetScale={}, configLargeBall={}",
-                shape, targetScale, cfg.scaleLargeBall);
+        float yawDegrees = cfg.facingYawDegrees();
+        LOGGER.info("HeadFirework: shape={}, targetScale={}, facing={}", shape, targetScale, cfg.facing);
         float startScale = targetScale * cfg.animationStartRatio;
 
         // load()が内部で座標・アイテムをリセットするため、先にtransformationを適用する(開始サイズで)
-        setHeadTransformation(display, serverLevel, startScale);
+        setHeadTransformation(display, serverLevel, startScale, yawDegrees);
 
         // load()の後にsetPos()を呼ぶことで、正しい座標を確実に反映させる
         display.setPos(posX, posY, posZ);
@@ -267,11 +322,11 @@ public class HeadFireworkMod implements ModInitializer {
         display.getSlot(0).set(headStack);
 
         serverLevel.addFreshEntity(display);
-        activeHeadDisplays.put(display, server.getTickCount() + cfg.displayDurationTicks);
 
         animatingHeads.put(display.getUUID(),
                 new HeadAnimation(display, serverLevel, headStack, posX, posY, posZ,
-                        targetScale, server.getTickCount(), cfg.animationDurationTicks));
+                        targetScale, yawDegrees, server.getTickCount(),
+                        cfg.animationDurationTicks, cfg.displayDurationTicks, cfg.fadeDurationTicks));
 
         LOGGER.info(
             "HeadFirework: displaying head at {}, {}, {}",
