@@ -1,0 +1,8 @@
+scale:
+  small_ball: 5.0
+  large_ball: 10.0
+  star_burst: 14.0
+display_duration: 60
+animation_duration: 10
+fade_duration: 10
+facing: south

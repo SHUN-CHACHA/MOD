@@ -1,0 +1,17 @@
+name: HeadFireworkPaper
+version: '${version}'
+main: dev.shuncha.headfireworkpaper.HeadFireworkPaperPlugin
+api-version: '1.20'
+author: shuncha
+description: プレイヤーヘッド花火プラグイン(Paper版)
+
+commands:
+  headfirework:
+    description: HeadFireworkの設定コマンド
+    usage: /headfirework config <項目> <値>
+    permission: headfirework.admin
+
+permissions:
+  headfirework.admin:
+    description: HeadFireworkの設定変更を許可
+    default: op
