@@ -40,6 +40,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -278,36 +279,65 @@ public class HeadFireworkMod implements ModInitializer {
 
     private void onFireworkExploded(FireworkRocketEntity rocket, MinecraftServer server) {
         ItemStack fireworkStack = rocket.getItem();
-        ResolvableProfile profile = fireworkStack.get(DataComponents.PROFILE);
-        if (profile == null) {
-            return;
+
+        // v1.3.0で複数プレイヤー対応: CUSTOM_DATAに保存された複数オーナーのリストを試みる。
+        // 無ければ(古い単一オーナー形式)、従来通りPROFILEコンポーネント1つだけで表示する。
+        List<ResolvableProfile> owners = PlayerHeadFireworkRocketRecipe.readOwners(fireworkStack);
+        if (owners == null || owners.isEmpty()) {
+            ResolvableProfile single = fireworkStack.get(DataComponents.PROFILE);
+            if (single == null) {
+                return;
+            }
+            owners = List.of(single);
         }
 
-        // ロケットにはFIREWORK_EXPLOSIONではなくFIREWORKS(飛翔時間+爆発リスト)が入っている
-        FireworkExplosion.Shape shape = FireworkExplosion.Shape.SMALL_BALL;
         Fireworks fireworks = fireworkStack.get(DataComponents.FIREWORKS);
-        if (fireworks != null && !fireworks.explosions().isEmpty()) {
-            shape = fireworks.explosions().get(0).shape();
-        }
+        List<FireworkExplosion> explosions = fireworks != null ? fireworks.explosions() : List.of();
 
         Level level = rocket.level();
         if (!(level instanceof ServerLevel serverLevel)) {
             return;
         }
 
+        HeadFireworkConfig cfg = HeadFireworkConfig.INSTANCE;
+        float yawDegrees = cfg.facingYawDegrees();
+        double yawRad = Math.toRadians(yawDegrees);
+        // 顔が向いている方角に対して垂直な左右方向の単位ベクトル(複数人を横に並べるため)
+        double perpX = -Math.cos(yawRad);
+        double perpZ = Math.sin(yawRad);
+
+        int count = Math.min(owners.size(), explosions.isEmpty() ? owners.size() : explosions.size());
+        for (int i = 0; i < count; i++) {
+            ResolvableProfile profile = owners.get(i);
+            if (profile == null) {
+                continue;
+            }
+            FireworkExplosion.Shape shape = i < explosions.size()
+                    ? explosions.get(i).shape()
+                    : FireworkExplosion.Shape.SMALL_BALL;
+            spawnHead(rocket, server, serverLevel, cfg, profile, shape, i, count, perpX, perpZ, yawDegrees);
+        }
+    }
+
+    private void spawnHead(FireworkRocketEntity rocket, MinecraftServer server, ServerLevel serverLevel,
+                            HeadFireworkConfig cfg, ResolvableProfile profile, FireworkExplosion.Shape shape,
+                            int index, int totalCount, double perpX, double perpZ, float yawDegrees) {
         Display.ItemDisplay display = EntityTypes.ITEM_DISPLAY.create(serverLevel, EntitySpawnReason.TRIGGERED);
         if (display == null) {
             LOGGER.warn("HeadFirework: failed to create ItemDisplay entity.");
             return;
         }
 
-        double posX = rocket.getX();
-        double posY = rocket.getY();
-        double posZ = rocket.getZ();
-
-        HeadFireworkConfig cfg = HeadFireworkConfig.INSTANCE;
         float targetScale = cfg.scaleForShape(shape);
-        float yawDegrees = cfg.facingYawDegrees();
+
+        // 複数人分の顔が同じ座標に重なって見えなくなるのを防ぐため、
+        // 表示サイズに応じた間隔で、向いている方角に対して垂直な左右方向に並べる
+        double spacing = Math.max(1.0, targetScale * 0.8);
+        double offsetAmount = (index - (totalCount - 1) / 2.0) * spacing;
+        double posX = rocket.getX() + perpX * offsetAmount;
+        double posY = rocket.getY();
+        double posZ = rocket.getZ() + perpZ * offsetAmount;
+
         LOGGER.info("HeadFirework: shape={}, targetScale={}, facing={}", shape, targetScale, cfg.facing);
         float startScale = targetScale * cfg.animationStartRatio;
 
@@ -328,9 +358,6 @@ public class HeadFireworkMod implements ModInitializer {
                         targetScale, yawDegrees, server.getTickCount(),
                         cfg.animationDurationTicks, cfg.displayDurationTicks, cfg.fadeDurationTicks));
 
-        LOGGER.info(
-            "HeadFirework: displaying head at {}, {}, {}",
-            rocket.getX(), rocket.getY(), rocket.getZ()
-        );
+        LOGGER.info("HeadFirework: displaying head at {}, {}, {}", posX, posY, posZ);
     }
 }
