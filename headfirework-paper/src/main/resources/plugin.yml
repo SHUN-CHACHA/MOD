@@ -7,11 +7,15 @@ description: プレイヤーヘッド花火プラグイン(Paper版)
 
 commands:
   headfirework:
-    description: HeadFireworkの設定コマンド
-    usage: /headfirework config <項目> <値>
-    permission: headfirework.admin
+    description: HeadFireworkの設定・個人設定コマンド
+    usage: /headfirework config <項目> <値> / myface <方角> / mygui
+    permission: headfirework.use
+    permission-message: '&cこのコマンドを使う権限がありません。'
 
 permissions:
   headfirework.admin:
-    description: HeadFireworkの設定変更を許可
+    description: HeadFireworkのサーバー全体の設定変更を許可(管理者用)
     default: op
+  headfirework.use:
+    description: HeadFireworkの個人設定コマンド(myface/mygui/testhead)の使用を許可
+    default: true

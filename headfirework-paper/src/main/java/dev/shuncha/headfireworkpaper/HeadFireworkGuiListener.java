@@ -13,13 +13,20 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 
 import java.util.List;
+import java.util.UUID;
 
 /**
- * /headfirework gui で開くチェストGUI設定画面。
+ * /headfirework gui(管理者用)と /headfirework mygui(参加者本人用)の
+ * チェストGUIをまとめて扱うクラス。
+ *
  * Fabric MOD版のCtrl+JキーによるGUI画面(クライアント側MOD前提)の代わりに、
  * サーバー側だけで完結するチェストGUIとして実装している。
  */
 public class HeadFireworkGuiListener implements Listener {
+
+    // ------------------------------------------------------------------
+    // 管理者用GUI(/headfirework gui) — サーバー全体の設定
+    // ------------------------------------------------------------------
 
     private static final int SIZE = 54;
 
@@ -32,11 +39,24 @@ public class HeadFireworkGuiListener implements Listener {
     private static final int FACING_BUTTON = 4;
     private static final int CLOSE_BUTTON = 53;
 
+    // ------------------------------------------------------------------
+    // 参加者本人用GUI(/headfirework mygui) — 自分の顔の向きだけの簡易版
+    // ------------------------------------------------------------------
+
+    private static final int PERSONAL_SIZE = 27;
+    private static final int PERSONAL_FACING_BUTTON = 13;
+    private static final int PERSONAL_RESET_BUTTON = 11;
+    private static final int PERSONAL_CLOSE_BUTTON = 26;
+
     private final HeadFireworkPaperPlugin plugin;
 
     public HeadFireworkGuiListener(HeadFireworkPaperPlugin plugin) {
         this.plugin = plugin;
     }
+
+    // ------------------------------------------------------------------
+    // 管理者用GUI
+    // ------------------------------------------------------------------
 
     public void open(Player player) {
         Holder holder = new Holder();
@@ -71,7 +91,8 @@ public class HeadFireworkGuiListener implements Listener {
         inventory.setItem(FADE_DURATION_PLUS, arrowItem("+5"));
         inventory.setItem(FADE_DURATION_RESET, resetItem());
 
-        inventory.setItem(FACING_BUTTON, facingItem(config.getFacing()));
+        inventory.setItem(FACING_BUTTON, facingItem(config.getFacing(),
+                "サーバー全体のデフォルトの向き", "クリックで切り替え(北→東→南→西)"));
         inventory.setItem(CLOSE_BUTTON, closeItem());
     }
 
@@ -84,12 +105,53 @@ public class HeadFireworkGuiListener implements Listener {
         inventory.setItem(resetSlot, resetItem());
     }
 
+    // ------------------------------------------------------------------
+    // 参加者本人用GUI
+    // ------------------------------------------------------------------
+
+    public void openPersonal(Player player) {
+        PersonalHolder holder = new PersonalHolder(player.getUniqueId());
+        Inventory inventory = plugin.getServer().createInventory(holder, PERSONAL_SIZE,
+                ChatColor.DARK_GRAY + "HeadFirework 自分の設定");
+        holder.inventory = inventory;
+        renderPersonal(inventory, player);
+        player.openInventory(inventory);
+    }
+
+    private void renderPersonal(Inventory inventory, Player player) {
+        HeadFireworkConfig config = plugin.getHeadFireworkConfig();
+        inventory.clear();
+        fillBackground(inventory);
+
+        BlockFace effective = config.getPlayerFacing(player.getName()).orElse(config.getFacing());
+        boolean isPersonal = config.getPlayerFacing(player.getName()).isPresent();
+
+        String status = isPersonal
+                ? ChatColor.AQUA + "個人設定が有効です"
+                : ChatColor.GRAY + "サーバーのデフォルト値を使用中です";
+        inventory.setItem(PERSONAL_FACING_BUTTON, facingItem(effective,
+                "自分の花火の顔の向き", "クリックで切り替え(北→東→南→西)", status));
+
+        ItemStack resetItem = new ItemStack(Material.BARRIER);
+        ItemMeta resetMeta = resetItem.getItemMeta();
+        resetMeta.setDisplayName(ChatColor.RED + "サーバーのデフォルト値に戻す");
+        resetMeta.setLore(List.of(ChatColor.GRAY + "個人設定を削除します"));
+        resetItem.setItemMeta(resetMeta);
+        inventory.setItem(PERSONAL_RESET_BUTTON, resetItem);
+
+        inventory.setItem(PERSONAL_CLOSE_BUTTON, closeItem());
+    }
+
+    // ------------------------------------------------------------------
+    // GUIパーツ共通部品
+    // ------------------------------------------------------------------
+
     private void fillBackground(Inventory inventory) {
         ItemStack filler = new ItemStack(Material.GRAY_STAINED_GLASS_PANE);
         ItemMeta meta = filler.getItemMeta();
         meta.setDisplayName(" ");
         filler.setItemMeta(meta);
-        for (int i = 0; i < SIZE; i++) {
+        for (int i = 0; i < inventory.getSize(); i++) {
             inventory.setItem(i, filler);
         }
     }
@@ -119,11 +181,11 @@ public class HeadFireworkGuiListener implements Listener {
         return item;
     }
 
-    private ItemStack facingItem(BlockFace facing) {
+    private ItemStack facingItem(BlockFace facing, String titleLabel, String... loreLines) {
         ItemStack item = new ItemStack(Material.COMPASS);
         ItemMeta meta = item.getItemMeta();
-        meta.setDisplayName(ChatColor.GREEN + "顔の向き: " + facingLabel(facing));
-        meta.setLore(List.of(ChatColor.GRAY + "クリックで切り替え(北→東→南→西)"));
+        meta.setDisplayName(ChatColor.GREEN + titleLabel + ": " + facingLabel(facing));
+        meta.setLore(List.of(loreLines).stream().map(line -> ChatColor.GRAY + line).toList());
         item.setItemMeta(meta);
         return item;
     }
@@ -145,8 +207,16 @@ public class HeadFireworkGuiListener implements Listener {
         };
     }
 
+    // ------------------------------------------------------------------
+    // クリック処理
+    // ------------------------------------------------------------------
+
     @EventHandler
     public void onClick(InventoryClickEvent event) {
+        if (event.getInventory().getHolder() instanceof PersonalHolder personalHolder) {
+            handlePersonalClick(event, personalHolder);
+            return;
+        }
         if (!(event.getInventory().getHolder() instanceof Holder)) return;
         event.setCancelled(true); // アイテムを持ち出せないようにする
 
@@ -191,14 +261,56 @@ public class HeadFireworkGuiListener implements Listener {
         render(event.getInventory());
     }
 
+    private void handlePersonalClick(InventoryClickEvent event, PersonalHolder holder) {
+        event.setCancelled(true);
+        if (!(event.getWhoClicked() instanceof Player player)) return;
+        // 本人以外がこのGUIを操作することは想定していないが、念のため確認する。
+        if (!player.getUniqueId().equals(holder.ownerId)) return;
+
+        HeadFireworkConfig config = plugin.getHeadFireworkConfig();
+        switch (event.getRawSlot()) {
+            case PERSONAL_FACING_BUTTON -> {
+                BlockFace current = config.getPlayerFacing(player.getName()).orElse(config.getFacing());
+                config.setPlayerFacing(player.getName(), config.cycleFacingValue(current));
+            }
+            case PERSONAL_RESET_BUTTON -> config.resetPlayerFacing(player.getName());
+            case PERSONAL_CLOSE_BUTTON -> {
+                config.save();
+                player.closeInventory();
+                return;
+            }
+            default -> {
+                return;
+            }
+        }
+
+        config.save();
+        renderPersonal(event.getInventory(), player);
+    }
+
     private void adjustScale(HeadFireworkConfig config, HeadFireworkConfig.ExplosionShape shape, double delta) {
         double newValue = Math.max(0.5, config.getScale(shape) + delta);
         config.setScale(shape, newValue);
     }
 
-    /** このプラグインのGUIインベントリだと識別するためのマーカー。 */
+    /** 管理者用GUIのインベントリだと識別するためのマーカー。 */
     private static class Holder implements InventoryHolder {
         private Inventory inventory;
+
+        @Override
+        public Inventory getInventory() {
+            return inventory;
+        }
+    }
+
+    /** 参加者本人用GUIのインベントリだと識別するためのマーカー。誰が開いたGUIかも保持する。 */
+    private static class PersonalHolder implements InventoryHolder {
+        private final UUID ownerId;
+        private Inventory inventory;
+
+        private PersonalHolder(UUID ownerId) {
+            this.ownerId = ownerId;
+        }
 
         @Override
         public Inventory getInventory() {

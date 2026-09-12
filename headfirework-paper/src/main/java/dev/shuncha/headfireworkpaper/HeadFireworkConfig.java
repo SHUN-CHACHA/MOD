@@ -1,7 +1,12 @@
 package dev.shuncha.headfireworkpaper;
 
 import org.bukkit.block.BlockFace;
+import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
+
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Optional;
 
 /**
  * HeadFireworkの各種設定値を保持するクラス。
@@ -32,6 +37,14 @@ public class HeadFireworkConfig {
     private int fadeDuration = DEFAULT_FADE_DURATION;
     private BlockFace facing = BlockFace.SOUTH;
 
+    /**
+     * プレイヤーごとの個人設定。現状は「顔の向き」だけだが、将来的にサイズ等の
+     * 個人設定を増やしても対応しやすいよう、プレイヤー名をキーにしたMapで持たせている。
+     * キーはプレイヤー名(小文字化して比較)。値は設定済みの向きのみを保持し、
+     * 未設定のプレイヤーはMapに存在しない(=サーバー全体のデフォルトを使う)。
+     */
+    private final Map<String, BlockFace> playerFacing = new HashMap<>();
+
     public HeadFireworkConfig(HeadFireworkPaperPlugin plugin) {
         this.plugin = plugin;
     }
@@ -49,6 +62,17 @@ public class HeadFireworkConfig {
         animationDuration = c.getInt("animation_duration", DEFAULT_ANIMATION_DURATION);
         fadeDuration = c.getInt("fade_duration", DEFAULT_FADE_DURATION);
         facing = parseFacing(c.getString("facing", DEFAULT_FACING));
+
+        playerFacing.clear();
+        ConfigurationSection playerSection = c.getConfigurationSection("player_settings");
+        if (playerSection != null) {
+            for (String name : playerSection.getKeys(false)) {
+                BlockFace personal = parseFacingOrNull(playerSection.getString(name + ".facing"));
+                if (personal != null) {
+                    playerFacing.put(name.toLowerCase(), personal);
+                }
+            }
+        }
     }
 
     /** 現在の設定値をconfig.ymlに保存する。 */
@@ -61,27 +85,72 @@ public class HeadFireworkConfig {
         c.set("animation_duration", animationDuration);
         c.set("fade_duration", fadeDuration);
         c.set("facing", facing.name().toLowerCase());
+
+        // プレイヤー個人設定は、削除(reset)されたプレイヤーが残らないよう
+        // 一度セクションごとクリアしてから書き直す。
+        c.set("player_settings", null);
+        for (Map.Entry<String, BlockFace> entry : playerFacing.entrySet()) {
+            c.set("player_settings." + entry.getKey() + ".facing", entry.getValue().name().toLowerCase());
+        }
+
         plugin.saveConfig();
     }
 
     private BlockFace parseFacing(String value) {
-        if (value == null) return BlockFace.SOUTH;
+        BlockFace face = parseFacingOrNull(value);
+        return face != null ? face : BlockFace.SOUTH;
+    }
+
+    /** 不正な値やnullの場合にSOUTHへフォールバックせず、そのままnullを返す版。個人設定の読み込み用。 */
+    private BlockFace parseFacingOrNull(String value) {
+        if (value == null) return null;
         return switch (value.toLowerCase()) {
             case "north" -> BlockFace.NORTH;
             case "east" -> BlockFace.EAST;
+            case "south" -> BlockFace.SOUTH;
             case "west" -> BlockFace.WEST;
-            default -> BlockFace.SOUTH;
+            default -> null;
         };
     }
 
     /** 方角(BlockFace)をY軸回転角(度)に変換する。実機検証済みの値。 */
     public float facingYawDegrees() {
-        return switch (facing) {
+        return yawDegreesOf(facing);
+    }
+
+    private float yawDegreesOf(BlockFace face) {
+        return switch (face) {
             case NORTH -> 0f;
             case WEST -> 90f;
             case SOUTH -> 180f;
             default -> 270f; // EAST
         };
+    }
+
+    /**
+     * 指定したプレイヤー(花火の持ち主)の顔が実際に向くべきYaw角度を返す。
+     * 個人設定(/headfirework myface)があればそれを優先し、無ければサーバー全体の
+     * デフォルト設定を使う。花火を作った時点の設定は保存されず、爆発した瞬間の
+     * "現在の"設定を都度参照する(現在設定方式)。
+     */
+    public float facingYawDegreesFor(String playerName) {
+        BlockFace personal = playerName != null ? playerFacing.get(playerName.toLowerCase()) : null;
+        return yawDegreesOf(personal != null ? personal : facing);
+    }
+
+    /** プレイヤー個人の顔の向き設定を取得する。設定していなければ空。 */
+    public Optional<BlockFace> getPlayerFacing(String playerName) {
+        return Optional.ofNullable(playerFacing.get(playerName.toLowerCase()));
+    }
+
+    /** プレイヤー個人の顔の向きを設定する。 */
+    public void setPlayerFacing(String playerName, BlockFace face) {
+        playerFacing.put(playerName.toLowerCase(), face);
+    }
+
+    /** プレイヤー個人の顔の向き設定を削除し、サーバー全体のデフォルトに戻す。 */
+    public void resetPlayerFacing(String playerName) {
+        playerFacing.remove(playerName.toLowerCase());
     }
 
     public double getScale(ExplosionShape shape) {
@@ -123,9 +192,14 @@ public class HeadFireworkConfig {
     public BlockFace getFacing() { return facing; }
     public void setFacing(BlockFace f) { facing = f; }
 
-    /** GUIの「顔の向き」ボタン用: 北→東→南→西と循環させる。 */
+    /** GUIの「顔の向き」ボタン用: 北→東→南→西と循環させる(サーバー全体のデフォルト設定を変更)。 */
     public void cycleFacing() {
-        facing = switch (facing) {
+        facing = cycleFacingValue(facing);
+    }
+
+    /** 北→東→南→西と循環させた次の値を返す(個人設定GUIとの共用ロジック)。 */
+    public BlockFace cycleFacingValue(BlockFace current) {
+        return switch (current) {
             case NORTH -> BlockFace.EAST;
             case EAST -> BlockFace.SOUTH;
             case SOUTH -> BlockFace.WEST;

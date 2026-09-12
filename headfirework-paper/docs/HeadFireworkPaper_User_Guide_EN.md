@@ -56,9 +56,26 @@ When the rocket explodes, the face(s) of the player(s) behind the stars appear a
 - Multiple faces are arranged side by side
 - The direction each face looks (north/east/south/west) can be configured
 
-## Configuration
+## Setting your own face direction (for regular players)
 
-Changing settings requires the `headfirework.admin` permission (operator by default).
+You don't need to be an operator to set which way your own face looks when it appears in a firework.
+
+```
+/headfirework myface <north|south|east|west>  … set the direction for your own face
+/headfirework myface show                     … check your current setting
+/headfirework myface reset                    … remove your personal setting (falls back to the server default)
+/headfirework mygui                           … do the same thing through a chest GUI
+```
+
+- Anyone can use this — no admin permission required
+- Once set, **whenever a firework crafted with your own head explodes**, your face appears facing the direction you chose — no matter who actually launches the rocket. Other players don't need to set anything themselves to see it correctly
+- The direction used is **your setting at the moment the firework explodes**, not at the moment it was crafted. If you change your setting later, even fireworks you crafted earlier and stockpiled will use the new setting when launched
+- When stars from multiple players are combined into one rocket, each face displays using its own owner's setting (the faces are still laid out in a row based on the server's default direction, so the layout itself stays consistent)
+- If you haven't set a personal preference, the server-wide default (set by an admin, see below) is used
+
+## Server-wide configuration (for admins)
+
+Changing the server-wide default settings requires the `headfirework.admin` permission (operator by default).
 
 ### Via commands
 

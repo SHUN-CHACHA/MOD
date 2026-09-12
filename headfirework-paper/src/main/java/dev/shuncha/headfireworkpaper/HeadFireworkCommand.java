@@ -11,8 +11,13 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * /headfirework config ... コマンドの処理。
+ * /headfirework ... コマンドの処理。
  * Fabric MOD版の/headfirework configコマンド体系に合わせている。
+ *
+ * 権限について: このコマンド自体はplugin.ymlで誰でも実行できる権限(headfirework.use、
+ * デフォルトtrue)に紐付けている。そのうえで、管理者専用のサブコマンド(config / gui)
+ * だけをここで明示的にheadfirework.admin権限チェックしている。myface / mygui / testhead
+ * は参加者本人が使うためのコマンドなので、admin権限は要求しない。
  */
 public class HeadFireworkCommand implements CommandExecutor, TabCompleter {
 
@@ -32,7 +37,22 @@ public class HeadFireworkCommand implements CommandExecutor, TabCompleter {
         if (args.length > 0 && args[0].equalsIgnoreCase("testhead")) {
             return handleTestHead(sender, args);
         }
+        if (args.length > 0 && args[0].equalsIgnoreCase("myface")) {
+            return handleMyFace(sender, args);
+        }
+        if (args.length > 0 && args[0].equalsIgnoreCase("mygui")) {
+            if (!(sender instanceof org.bukkit.entity.Player player)) {
+                sender.sendMessage(ChatColor.RED + "このコマンドはプレイヤーのみ実行できます。");
+                return true;
+            }
+            plugin.getGuiListener().openPersonal(player);
+            return true;
+        }
         if (args.length > 0 && args[0].equalsIgnoreCase("gui")) {
+            if (!sender.hasPermission("headfirework.admin")) {
+                sender.sendMessage(ChatColor.RED + "このコマンドを使う権限がありません。");
+                return true;
+            }
             if (!(sender instanceof org.bukkit.entity.Player player)) {
                 sender.sendMessage(ChatColor.RED + "このコマンドはプレイヤーのみ実行できます。");
                 return true;
@@ -44,7 +64,13 @@ public class HeadFireworkCommand implements CommandExecutor, TabCompleter {
         HeadFireworkConfig config = plugin.getHeadFireworkConfig();
 
         if (args.length == 0 || !args[0].equalsIgnoreCase("config")) {
-            sender.sendMessage(ChatColor.RED + "使用法: /headfirework config <項目> <値> / /headfirework gui / /headfirework testhead <pitch> <roll> <yaw>");
+            sender.sendMessage(ChatColor.RED + "使用法: /headfirework config <項目> <値> / /headfirework gui / "
+                    + "/headfirework myface <方角> / /headfirework mygui / /headfirework testhead <pitch> <roll> <yaw>");
+            return true;
+        }
+
+        if (!sender.hasPermission("headfirework.admin")) {
+            sender.sendMessage(ChatColor.RED + "このコマンドを使う権限がありません。");
             return true;
         }
 
@@ -92,6 +118,58 @@ public class HeadFireworkCommand implements CommandExecutor, TabCompleter {
         } catch (NumberFormatException e) {
             sender.sendMessage(ChatColor.RED + "角度は数値で指定してください。");
         }
+        return true;
+    }
+
+    /**
+     * 参加者本人が、自分の花火に映る顔の向きを設定するコマンド。管理者権限は不要。
+     * /headfirework myface <north|south|east|west> … 向きを設定
+     * /headfirework myface show                     … 現在の自分の設定を表示
+     * /headfirework myface reset                    … 個人設定を削除し、サーバーのデフォルトに戻す
+     */
+    private boolean handleMyFace(CommandSender sender, String[] args) {
+        if (!(sender instanceof org.bukkit.entity.Player player)) {
+            sender.sendMessage(ChatColor.RED + "このコマンドはプレイヤーのみ実行できます。");
+            return true;
+        }
+        HeadFireworkConfig config = plugin.getHeadFireworkConfig();
+
+        if (args.length < 2) {
+            sender.sendMessage(ChatColor.RED + "使用法: /headfirework myface <north|south|east|west> / show / reset");
+            return true;
+        }
+
+        String value = args[1].toLowerCase();
+
+        if (value.equals("show")) {
+            String current = config.getPlayerFacing(player.getName())
+                    .map(f -> f.name().toLowerCase())
+                    .orElse("未設定(サーバーのデフォルト値「" + config.getFacing().name().toLowerCase() + "」を使用中)");
+            player.sendMessage(ChatColor.YELLOW + "あなたの花火の顔の向き設定: " + ChatColor.AQUA + current);
+            return true;
+        }
+        if (value.equals("reset")) {
+            config.resetPlayerFacing(player.getName());
+            config.save();
+            player.sendMessage(ChatColor.GREEN + "顔の向き設定をサーバーのデフォルト値に戻しました。");
+            return true;
+        }
+
+        BlockFace face = switch (value) {
+            case "north" -> BlockFace.NORTH;
+            case "east" -> BlockFace.EAST;
+            case "south" -> BlockFace.SOUTH;
+            case "west" -> BlockFace.WEST;
+            default -> null;
+        };
+        if (face == null) {
+            sender.sendMessage(ChatColor.RED + "不明な方角です: " + args[1]
+                    + " (使用可能: " + String.join(", ", DIRECTIONS) + " / show / reset)");
+            return true;
+        }
+        config.setPlayerFacing(player.getName(), face);
+        config.save();
+        player.sendMessage(ChatColor.GREEN + "あなたの花火に映る顔の向きを" + value + "に設定しました。");
         return true;
     }
 
@@ -181,14 +259,24 @@ public class HeadFireworkCommand implements CommandExecutor, TabCompleter {
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         List<String> options = new ArrayList<>();
         if (args.length == 1) {
-            options.add("config");
-            options.add("testhead");
-            options.add("gui");
+            options.add("myface");
+            options.add("mygui");
+            if (sender.hasPermission("headfirework.admin")) {
+                options.add("config");
+                options.add("gui");
+                options.add("testhead");
+            }
         } else if (args.length == 2) {
-            options.addAll(SUBCOMMANDS);
+            if (args[0].equalsIgnoreCase("config")) {
+                options.addAll(SUBCOMMANDS);
+            } else if (args[0].equalsIgnoreCase("myface")) {
+                options.addAll(DIRECTIONS);
+                options.add("show");
+                options.add("reset");
+            }
         } else if (args.length == 3) {
-            if (args[1].equalsIgnoreCase("scale")) options.addAll(SHAPES);
-            if (args[1].equalsIgnoreCase("facing")) options.addAll(DIRECTIONS);
+            if (args[0].equalsIgnoreCase("config") && args[1].equalsIgnoreCase("scale")) options.addAll(SHAPES);
+            if (args[0].equalsIgnoreCase("config") && args[1].equalsIgnoreCase("facing")) options.addAll(DIRECTIONS);
         }
         return options;
     }

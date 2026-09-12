@@ -66,16 +66,22 @@ public class FireworkListener implements Listener {
         HeadFireworkConfig config = plugin.getHeadFireworkConfig();
         HeadFireworkConfig.ExplosionShape configShape = toConfigShape(shape);
         float targetScale = (float) config.getScale(configShape);
+        // 顔自体が向く方角は、持ち主本人の個人設定(/headfirework myface)があればそれを優先し、
+        // 無ければサーバー全体のデフォルト設定を使う(打ち上げ時点の"現在の"設定を都度参照する)。
+        float personalYaw = config.facingYawDegreesFor(ownerName);
 
         // 複数人分の顔が同じ座標に重なって見えなくなるのを防ぐため、
         // 表示サイズに応じた間隔で横一列に並べる。
-        // 「顔が向いている方角(facingYawDegrees)」と同じ軸でずらすと、正面から見たときに
+        // 「顔が向いている方角」と同じ軸でずらすと、正面から見たときに
         // 奥行き方向に重なって見えてしまうため、向きに対して垂直な左右方向にずらす。
+        // 複数人が個人ごとに違う向きを設定していても並びがバラバラにならないよう、
+        // 並べる軸自体はサーバー全体のデフォルトの向きを基準にする
+        // (顔"自体"の向きだけが個人設定に従い、顔を並べる"位置"は共通のまま)。
         double spacing = Math.max(1.0, targetScale * 0.8);
         double offsetAmount = (index - (totalCount - 1) / 2.0) * spacing;
-        double yawRad = Math.toRadians(config.facingYawDegrees());
-        double perpX = -Math.cos(yawRad);
-        double perpZ = Math.sin(yawRad);
+        double rowYawRad = Math.toRadians(config.facingYawDegrees());
+        double perpX = -Math.cos(rowYawRad);
+        double perpZ = Math.sin(rowYawRad);
         Location location = baseLocation.clone().add(perpX * offsetAmount, 0, perpZ * offsetAmount);
 
         ItemStack headItem = new ItemStack(Material.PLAYER_HEAD);
@@ -96,7 +102,7 @@ public class FireworkListener implements Listener {
             // 花火(エンティティ)自体が飛翔中の向き(yaw/pitch)を持っているため、
             // それをリセットしないとTransformationの回転と二重にかかってしまう。
             d.setRotation(0f, 0f);
-            d.setTransformation(scaledTransformation(0f, config.facingYawDegrees()));
+            d.setTransformation(scaledTransformation(0f, personalYaw));
         });
 
         int animationDuration = config.getAnimationDuration();
@@ -131,7 +137,7 @@ public class FireworkListener implements Listener {
                     return;
                 }
 
-                display.setTransformation(scaledTransformation(Math.max(0f, scale), config.facingYawDegrees()));
+                display.setTransformation(scaledTransformation(Math.max(0f, scale), personalYaw));
                 tick++;
             }
         }.runTaskTimer(plugin, 0L, 1L);

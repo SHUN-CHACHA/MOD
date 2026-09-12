@@ -112,7 +112,7 @@ double offsetAmount = (index - (totalCount - 1) / 2.0) * spacing;
 **Paper版はBukkit公開APIの`setItemStack`/`setTransformation`/`setBillboard`をそのまま使えるため、Fabric版で必要だった「`entity.load()`が座標・アイテムをリセットしてしまう問題への毎tick再適用」は不要です。** これはPaper版ならではの実装の簡潔さです。
 
 ### 向きの制御
-`Display.Billboard.FIXED` + `ItemDisplayTransform.NONE` + `setRotation(0f, 0f)`でエンティティ自体の向きをリセットしたうえで、`Transformation`のクォータニオン回転(Y軸のみ)で向きを制御しています。実機検証済みの値:
+`Display.Billboard.FIXED` + `ItemDisplayTransform.NONE` + `setRotation(0f, 0f)`でエンティティ自体の向きをリセットしたうえで、`Transformation`のクォータニオン回転(Y軸のみ)で向きを制御しています。**顔自体が向く角度は`config.facingYawDegreesFor(ownerName)`で、その顔の持ち主本人の個人設定(無ければサーバーのデフォルト)を使います。一方、複数人の顔を横に並べる際の「並べる軸」の計算(`perpX`/`perpZ`)は、個人ごとに軸がバラバラにならないよう、あえてサーバー全体のデフォルト向き(`config.facingYawDegrees()`)のまま統一しています。** つまり「顔の向き」は個人設定、「顔を並べる位置」はサーバー共通、という役割分担です。実機検証済みの角度の値:
 
 | 方角 | Yaw |
 |---|---|
@@ -138,21 +138,36 @@ scale:
 display_duration: 60     # 表示合計時間(tick、60tick=3秒)
 animation_duration: 10   # 拡大アニメーションの時間(tick)
 fade_duration: 10        # フェードアウトの時間(tick)
-facing: south             # 顔が正面を向く方角
+facing: south             # 顔が正面を向く方角(サーバー全体のデフォルト)
+player_settings:          # プレイヤーごとの個人設定(/headfirework myface)
+  ShunCha2525:
+    facing: east
 ```
 - `load()`でプラグイン起動時に`config.yml`から読み込み、`save()`で書き戻します(`plugin.onDisable()`時と、コマンド/GUIで値を変更した直後に呼ばれます)
 - `resetScale`/`resetDisplayDuration`等のリセットメソッドは、実行時の値をコード上の`DEFAULT_*`定数に戻すだけで、`config.yml`ファイル自体は書き換えません(次の`save()`で上書きされます)
 - クリーパー型(`CREEPER`)は`RecipeManager`のレシピからは生成されませんが、バニラの通常花火(頭無し)がクリーパー型で爆発した場合に備えて`getScale`のマッピングは残しています
+- `player_settings.<プレイヤー名>.facing`は、プレイヤー本人が`/headfirework myface`で設定した「自分の花火に映る顔の向き」の個人設定です。`Map<String, BlockFace> playerFacing`(キーは小文字化したプレイヤー名)として保持し、`save()`時は`player_settings`セクションごと一度クリアしてから書き直すため、`/headfirework myface reset`で削除されたプレイヤーが古い値のまま残ることはありません。今は「向き」だけですが、将来サイズ等の個人設定を増やす場合もこのMapと同じ要領で拡張できます
+- `facingYawDegreesFor(String playerName)`が、花火の持ち主(オーナー)ごとの実際のYaw角度を返す入口です。個人設定があればそれを、無ければサーバー全体の`facing`をフォールバックとして返します。**花火を作った時点の設定は保存されず、爆発した瞬間の"現在の"設定を都度参照する(現在設定方式)**という仕様です
 
 ---
 
 ## 5. `HeadFireworkCommand.java` / `HeadFireworkGuiListener.java`(設定変更手段)
 
-コマンドとGUIは同じ`HeadFireworkConfig`のインスタンスを操作する2つの入口です。**GUIには`animation_duration`(拡大アニメーション時間)のスライダーがありません**。追加する場合は`HeadFireworkGuiListener.render()`にスロットを割り当てて`onClick`に分岐を追加してください(手順はコマンド側の`display_duration`/`fade_duration`の実装を参考にすると早いです)。
+サーバー全体の設定(管理者用)と、プレイヤー本人の個人設定の2系統があります。
 
-権限は`plugin.yml`で`headfirework.admin`(デフォルト: op)として定義されており、`/headfirework config ...`と`/headfirework gui`の両方に必要です(`/headfirework testhead`には権限指定がなく、コマンド自体を使えるプレイヤーなら誰でも実行できます)。
+| コマンド | 権限 | 内容 |
+|---|---|---|
+| `/headfirework config ...` | `headfirework.admin` | サーバー全体のデフォルト設定 |
+| `/headfirework gui` | `headfirework.admin` | サーバー全体のデフォルト設定用チェストGUI |
+| `/headfirework myface <方角\|show\|reset>` | 誰でも(`headfirework.use`) | 自分の花火の顔の向きの個人設定 |
+| `/headfirework mygui` | 誰でも(`headfirework.use`) | 個人設定用の簡易チェストGUI(方角ボタン+リセット+閉じるのみ) |
+| `/headfirework testhead <pitch> <roll> <yaw>` | 誰でも(`headfirework.use`) | デバッグ用 |
 
-GUI(`HeadFireworkGuiListener`)を改造する際の注意点: `InventoryHolder`実装クラスの`getInventory()`を正しく実装しないと、内部的に呼ばれた際にクライアントが切断されるバグを踏みます(開発中に実際に発生した問題です)。
+**権限モデルの注意点(過去の記載の誤りを修正):** 以前は`plugin.yml`の`commands.headfirework.permission`に直接`headfirework.admin`を指定していたため、`/headfirework`コマンド全体(`testhead`も含む)がop専用になっていました。現在は誰でも実行できる`headfirework.use`(デフォルトtrue)をコマンド自体の権限にし、`config`/`gui`サブコマンドだけ`HeadFireworkCommand.onCommand()`内で`sender.hasPermission("headfirework.admin")`を個別チェックする方式に変更しています。新しく管理者専用のサブコマンドを追加する場合は、同じように内部チェックを足してください(`plugin.yml`側の権限を変更する必要はありません)。
+
+GUIには`animation_duration`(拡大アニメーション時間)のスライダーがありません(管理者用GUIのみの制約で、個人設定GUIにはそもそも対象外)。追加する場合は`HeadFireworkGuiListener.render()`にスロットを割り当てて`onClick`に分岐を追加してください(手順はコマンド側の`display_duration`/`fade_duration`の実装を参考にすると早いです)。
+
+個人設定GUI(`/headfirework mygui`)は、管理者用GUIとは別の`InventoryHolder`実装(`PersonalHolder`、開いたプレイヤーのUUIDを保持)を使って見分けています。`onClick`は`getHolder()`の型で管理者用/個人用に処理を振り分ける構造です。`InventoryHolder`実装クラスの`getInventory()`を正しく実装しないと、内部的に呼ばれた際にクライアントが切断されるバグを踏みます(開発中に実際に発生した問題です)。
 
 ---
 
