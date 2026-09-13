@@ -91,7 +91,6 @@ public class PlayerHeadFireworkStarRecipe extends CustomRecipe {
     @Override
     public ItemStack assemble(CraftingInput input) {
         ItemStack headStack = ItemStack.EMPTY;
-        int headCount = 0;
         IntList colors = new IntArrayList();
         boolean hasFireCharge = false;
         boolean hasFeather = false;
@@ -108,7 +107,6 @@ public class PlayerHeadFireworkStarRecipe extends CustomRecipe {
                 if (headStack.isEmpty()) {
                     headStack = stack;
                 }
-                headCount += stack.getCount();
             } else if (stack.has(DataComponents.DYE)) {
                 DyeColor color = stack.get(DataComponents.DYE);
                 if (color != null) {
@@ -140,8 +138,8 @@ public class PlayerHeadFireworkStarRecipe extends CustomRecipe {
             shape = FireworkExplosion.Shape.SMALL_BALL;
         }
 
-        // 投入したヘッドの個数分だけ星を生成する
-        ItemStack result = new ItemStack(Items.FIREWORK_STAR, Math.max(headCount, 1));
+        // 頭は何個入れても(何個でも消費されず)星は常に1個だけ生成する(Paper版の挙動と統一)
+        ItemStack result = new ItemStack(Items.FIREWORK_STAR, 1);
 
         result.set(DataComponents.FIREWORK_EXPLOSION, new FireworkExplosion(
                 shape,
