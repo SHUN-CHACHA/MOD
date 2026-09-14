@@ -39,13 +39,13 @@ jobs:
       # 「Gradle自体を動かすJDK17」と「コンパイル対象のJDK25(toolchain)」の
       # 2つをインストールし、fromEnvでGradleに両方の場所を教える。
       - name: Set up JDK 25 (for compile toolchain)
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "25"
 
       - name: Set up JDK 17 (runs Gradle itself)
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
