@@ -8,6 +8,7 @@ public class HeadFireworkPaperPlugin extends JavaPlugin {
     private RecipeManager recipeManager;
     private FireworkListener fireworkListener;
     private HeadFireworkGuiListener guiListener;
+    private UpdateChecker updateChecker;
 
     @Override
     public void onEnable() {
@@ -20,6 +21,12 @@ public class HeadFireworkPaperPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(fireworkListener, this);
         guiListener = new HeadFireworkGuiListener(this);
         getServer().getPluginManager().registerEvents(guiListener, this);
+
+        updateChecker = new UpdateChecker(this);
+        getServer().getPluginManager().registerEvents(new UpdateNotifyListener(this), this);
+        if (headFireworkConfig.isUpdateCheckEnabled()) {
+            updateChecker.checkAsync();
+        }
 
         HeadFireworkCommand command = new HeadFireworkCommand(this);
         getCommand("headfirework").setExecutor(command);
@@ -49,5 +56,9 @@ public class HeadFireworkPaperPlugin extends JavaPlugin {
 
     public HeadFireworkGuiListener getGuiListener() {
         return guiListener;
+    }
+
+    public UpdateChecker getUpdateChecker() {
+        return updateChecker;
     }
 }

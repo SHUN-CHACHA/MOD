@@ -14,8 +14,8 @@ import java.util.List;
  * /headfirework ... コマンドの処理。
  * Fabric MOD版の/headfirework configコマンド体系に合わせている。
  *
- * 権限について: このコマンド自体はplugin.ymlで誰でも実行できる権限(headfirework.use、
- * デフォルトtrue)に紐付けている。そのうえで、管理者専用のサブコマンド(config / gui)
+ * 権限について: このコマンド自体はplugin.ymlで誰でも実行できる権限「headfirework.use」に
+ * デフォルト(true)で紐付けている。そのうえで、管理者専用のサブコマンド(config / gui)
  * だけをここで明示的にheadfirework.admin権限チェックしている。myface / mygui / testhead
  * は参加者本人が使うためのコマンドなので、admin権限は要求しない。
  */
@@ -23,8 +23,9 @@ public class HeadFireworkCommand implements CommandExecutor, TabCompleter {
 
     private static final List<String> SHAPES = List.of("small_ball", "large_ball", "star", "creeper", "burst");
     private static final List<String> DIRECTIONS = List.of("north", "east", "south", "west");
+    private static final List<String> ON_OFF = List.of("on", "off");
     private static final List<String> SUBCOMMANDS = List.of(
-            "scale", "display_duration", "animation_duration", "fade_duration", "facing", "show");
+            "scale", "display_duration", "animation_duration", "fade_duration", "facing", "update_check", "show");
 
     private final HeadFireworkPaperPlugin plugin;
 
@@ -89,6 +90,7 @@ public class HeadFireworkCommand implements CommandExecutor, TabCompleter {
             case "fade_duration" -> handleIntSetting(sender, args, "フェードアウト時間",
                     config::setFadeDuration, config::resetFadeDuration);
             case "facing" -> handleFacing(sender, config, args);
+            case "update_check" -> handleUpdateCheck(sender, config, args);
             case "show" -> showConfig(sender, config);
             default -> sender.sendMessage(ChatColor.RED + "不明な項目です: " + sub);
         }
@@ -233,6 +235,27 @@ public class HeadFireworkCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage(ChatColor.GREEN + "顔の向きを" + args[2] + "に設定しました。");
     }
 
+    /**
+     * 起動時の更新チェックのON/OFFを切り替えるコマンド: /headfirework config update_check <on|off>
+     * 変更は次回のサーバー起動時から反映される(今回の起動分のチェック結果には影響しない)。
+     */
+    private void handleUpdateCheck(CommandSender sender, HeadFireworkConfig config, String[] args) {
+        if (args.length < 3) {
+            sender.sendMessage(ChatColor.RED + "使用法: /headfirework config update_check <on|off>");
+            return;
+        }
+        String value = args[2].toLowerCase();
+        if (value.equals("on")) {
+            config.setUpdateCheckEnabled(true);
+            sender.sendMessage(ChatColor.GREEN + "起動時の更新チェックを有効にしました(次回起動時から反映されます)。");
+        } else if (value.equals("off")) {
+            config.setUpdateCheckEnabled(false);
+            sender.sendMessage(ChatColor.GREEN + "起動時の更新チェックを無効にしました(次回起動時から反映されます)。");
+        } else {
+            sender.sendMessage(ChatColor.RED + "onまたはoffを指定してください: " + args[2]);
+        }
+    }
+
     private void showConfig(CommandSender sender, HeadFireworkConfig config) {
         sender.sendMessage(ChatColor.YELLOW + "=== HeadFirework 現在の設定 ===");
         for (HeadFireworkConfig.ExplosionShape shape : HeadFireworkConfig.ExplosionShape.values()) {
@@ -242,6 +265,7 @@ public class HeadFireworkCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage(ChatColor.GRAY + "  animation_duration: " + config.getAnimationDuration() + " tick");
         sender.sendMessage(ChatColor.GRAY + "  fade_duration: " + config.getFadeDuration() + " tick");
         sender.sendMessage(ChatColor.GRAY + "  facing: " + config.getFacing().name().toLowerCase());
+        sender.sendMessage(ChatColor.GRAY + "  update_check: " + (config.isUpdateCheckEnabled() ? "on" : "off"));
     }
 
     private HeadFireworkConfig.ExplosionShape parseShape(String value) {
@@ -277,6 +301,7 @@ public class HeadFireworkCommand implements CommandExecutor, TabCompleter {
         } else if (args.length == 3) {
             if (args[0].equalsIgnoreCase("config") && args[1].equalsIgnoreCase("scale")) options.addAll(SHAPES);
             if (args[0].equalsIgnoreCase("config") && args[1].equalsIgnoreCase("facing")) options.addAll(DIRECTIONS);
+            if (args[0].equalsIgnoreCase("config") && args[1].equalsIgnoreCase("update_check")) options.addAll(ON_OFF);
         }
         return options;
     }
