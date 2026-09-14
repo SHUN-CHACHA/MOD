@@ -85,6 +85,7 @@ Changing the server-wide default settings requires the `headfirework.admin` perm
 /headfirework config animation_duration <ticks>     … time spent growing in
 /headfirework config fade_duration <ticks>          … time spent fading out
 /headfirework config facing <north|south|east|west> … direction the face looks
+/headfirework config update_check <on|off>          … enable/disable the startup update check (default: on)
 /headfirework config show                           … list current values
 ```
 
@@ -96,7 +97,17 @@ Omit the value to reset that item to its default (e.g. `/headfirework config sca
 /headfirework gui
 ```
 
-Opens a chest GUI where each value can be adjusted with −/+ buttons, with a per-item reset button. Click the compass item to cycle the facing direction. **The animation growth time (`animation_duration`) is not available in the GUI — use the command instead.**
+Opens a chest GUI where each value can be adjusted with −/+ buttons, with a per-item reset button. Click the compass item to cycle the facing direction. **The animation growth time (`animation_duration`) and the update check (`update_check`) are not available in the GUI — use the command instead.**
+
+### Startup update check
+
+On server startup, the plugin automatically checks GitHub's release list for a newer Paper-edition (`headfirework-paper-v*`) version.
+
+- If a newer version is found, a log line is printed to the server console
+- Additionally, any player with the `headfirework.admin` permission (operator by default) who joins the server is notified in chat with a message and a download link
+- The check runs once at startup, asynchronously, so it never slows down server startup or gameplay
+- If an OP joins before the check has finished, no notification is shown for that join (no restart needed — they'll see it the next time they join after the check completes)
+- To disable it, run `/headfirework config update_check off` (default is on). The change takes effect the next time the server starts
 
 ### Debug command
 
