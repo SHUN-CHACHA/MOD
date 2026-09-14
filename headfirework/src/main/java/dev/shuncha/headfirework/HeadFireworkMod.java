@@ -20,6 +20,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.Mth;
 import net.minecraft.util.ProblemReporter;
 import net.minecraft.world.entity.Display;
@@ -178,17 +179,130 @@ public class HeadFireworkMod implements ModInitializer {
                                                     Component.literal("顔の向きを " + direction + " に変更しました"), true);
                                             return 1;
                                         })))
+                        // 強制モード: 有効な間は参加者の個人設定(myface)を無視して全員この向きに統一する。
+                        // 個人設定のデータ自体は消さないので、offにすれば元通り各自の設定に戻る。
+                        .then(Commands.literal("force_facing")
+                                .then(Commands.argument("direction", StringArgumentType.word())
+                                        .suggests((ctx, builder) -> SharedSuggestionProvider.suggest(
+                                                new String[]{"north", "south", "east", "west", "off"}, builder))
+                                        .executes(ctx -> {
+                                            String direction = StringArgumentType.getString(ctx, "direction");
+                                            HeadFireworkConfig cfg = HeadFireworkConfig.INSTANCE;
+                                            if (direction.equalsIgnoreCase("off")) {
+                                                cfg.clearForceFacing();
+                                                cfg.save();
+                                                ctx.getSource().sendSuccess(() -> Component.literal(
+                                                        "強制モードを解除しました。以後は各自の個人設定(未設定ならサーバーデフォルト)に戻ります。"), true);
+                                                return 1;
+                                            }
+                                            boolean valid = false;
+                                            for (String f : HeadFireworkConfig.VALID_FACINGS) {
+                                                if (f.equals(direction)) {
+                                                    valid = true;
+                                                    break;
+                                                }
+                                            }
+                                            if (!valid) {
+                                                ctx.getSource().sendFailure(Component.literal(
+                                                        "不明な方角: " + direction + " (north/south/east/west/off)"));
+                                                return 0;
+                                            }
+                                            cfg.setForceFacing(direction);
+                                            cfg.save();
+                                            ctx.getSource().sendSuccess(() -> Component.literal(
+                                                    "強制モードを有効にしました。個人設定を無視して全員 " + direction + " に統一します。"), true);
+                                            return 1;
+                                        })))
                         .then(Commands.literal("show")
                                 .executes(ctx -> {
                                     HeadFireworkConfig cfg = HeadFireworkConfig.INSTANCE;
                                     ctx.getSource().sendSuccess(() -> Component.literal(
-                                            "small_ball=%.1f large_ball=%.1f star=%.1f creeper=%.1f burst=%.1f display=%d fade=%d anim=%d facing=%s"
+                                            "small_ball=%.1f large_ball=%.1f star=%.1f creeper=%.1f burst=%.1f display=%d fade=%d anim=%d facing=%s force_facing=%s"
                                                     .formatted(cfg.scaleSmallBall, cfg.scaleLargeBall, cfg.scaleStar,
                                                             cfg.scaleCreeper, cfg.scaleBurst,
                                                             cfg.displayDurationTicks, cfg.fadeDurationTicks,
-                                                            cfg.animationDurationTicks, cfg.facing)), false);
+                                                            cfg.animationDurationTicks, cfg.facing,
+                                                            cfg.forceFacing != null ? cfg.forceFacing : "off")), false);
+                                    return 1;
+                                })))
+                // 参加者本人が、自分の花火に映る顔の向きを設定するコマンド。OP権限は不要(誰でも実行可能)。
+                // /headfirework myface <north|south|east|west> … 向きを設定
+                // /headfirework myface show                     … 現在の自分の設定を表示
+                // /headfirework myface reset                    … 個人設定を削除し、サーバーのデフォルトに戻す
+                .then(Commands.literal("myface")
+                        .executes(ctx -> {
+                            ctx.getSource().sendFailure(Component.literal(
+                                    "使用法: /headfirework myface <north|south|east|west> / show / reset"));
+                            return 0;
+                        })
+                        .then(Commands.literal("show")
+                                .executes(ctx -> {
+                                    ServerPlayer player = requirePlayer(ctx.getSource());
+                                    if (player == null) {
+                                        return 0;
+                                    }
+                                    HeadFireworkConfig cfg = HeadFireworkConfig.INSTANCE;
+                                    String personal = cfg.getPlayerFacing(player.getName().getString());
+                                    String message = personal != null
+                                            ? personal
+                                            : "未設定(サーバーのデフォルト値「" + cfg.facing + "」を使用中)";
+                                    ctx.getSource().sendSuccess(() ->
+                                            Component.literal("あなたの花火の顔の向き設定: " + message), false);
+                                    return 1;
+                                }))
+                        .then(Commands.literal("reset")
+                                .executes(ctx -> {
+                                    ServerPlayer player = requirePlayer(ctx.getSource());
+                                    if (player == null) {
+                                        return 0;
+                                    }
+                                    HeadFireworkConfig cfg = HeadFireworkConfig.INSTANCE;
+                                    cfg.resetPlayerFacing(player.getName().getString());
+                                    cfg.save();
+                                    ctx.getSource().sendSuccess(() ->
+                                            Component.literal("顔の向き設定をサーバーのデフォルト値に戻しました。"), true);
+                                    return 1;
+                                }))
+                        .then(Commands.argument("direction", StringArgumentType.word())
+                                .suggests((ctx, builder) -> SharedSuggestionProvider.suggest(
+                                        HeadFireworkConfig.VALID_FACINGS, builder))
+                                .executes(ctx -> {
+                                    ServerPlayer player = requirePlayer(ctx.getSource());
+                                    if (player == null) {
+                                        return 0;
+                                    }
+                                    String direction = StringArgumentType.getString(ctx, "direction");
+                                    boolean valid = false;
+                                    for (String f : HeadFireworkConfig.VALID_FACINGS) {
+                                        if (f.equals(direction)) {
+                                            valid = true;
+                                            break;
+                                        }
+                                    }
+                                    if (!valid) {
+                                        ctx.getSource().sendFailure(Component.literal(
+                                                "不明な方角: " + direction + " (north/south/east/west)"));
+                                        return 0;
+                                    }
+                                    HeadFireworkConfig cfg = HeadFireworkConfig.INSTANCE;
+                                    cfg.setPlayerFacing(player.getName().getString(), direction);
+                                    cfg.save();
+                                    ctx.getSource().sendSuccess(() ->
+                                            Component.literal("あなたの花火に映る顔の向きを " + direction + " に設定しました"), true);
                                     return 1;
                                 }))));
+    }
+
+    /**
+     * コマンド実行者がプレイヤーであることを確認するヘルパー。
+     * プレイヤーでなければエラーメッセージを送ってnullを返す。
+     */
+    private static ServerPlayer requirePlayer(CommandSourceStack source) {
+        if (source.getEntity() instanceof ServerPlayer player) {
+            return player;
+        }
+        source.sendFailure(Component.literal("このコマンドはプレイヤーのみ実行できます。"));
+        return null;
     }
 
     private void onServerTick(MinecraftServer server) {
@@ -300,9 +414,11 @@ public class HeadFireworkMod implements ModInitializer {
         }
 
         HeadFireworkConfig cfg = HeadFireworkConfig.INSTANCE;
-        float yawDegrees = cfg.facingYawDegrees();
-        double yawRad = Math.toRadians(yawDegrees);
-        // 顔が向いている方角に対して垂直な左右方向の単位ベクトル(複数人を横に並べるため)
+
+        // 複数人を横に並べる際の位置決め軸(row方向)は、隊列が乱れないよう
+        // サーバー全体のデフォルト向きを基準に固定する(個人設定はここでは使わない)。
+        float layoutYawDegrees = cfg.facingYawDegrees();
+        double yawRad = Math.toRadians(layoutYawDegrees);
         double perpX = -Math.cos(yawRad);
         double perpZ = Math.sin(yawRad);
 
@@ -315,7 +431,11 @@ public class HeadFireworkMod implements ModInitializer {
             FireworkExplosion.Shape shape = i < explosions.size()
                     ? explosions.get(i).shape()
                     : FireworkExplosion.Shape.SMALL_BALL;
-            spawnHead(rocket, server, serverLevel, cfg, profile, shape, i, count, perpX, perpZ, yawDegrees);
+            // 各人の顔自体の向きは、その人の個人設定(無ければサーバーデフォルト)に従う。
+            // 爆発した瞬間の"今の"設定を参照する(花火を作った時点の設定は保存しない)。
+            String ownerName = profile.name().orElse(null);
+            float ownerYawDegrees = cfg.facingYawDegreesFor(ownerName);
+            spawnHead(rocket, server, serverLevel, cfg, profile, shape, i, count, perpX, perpZ, ownerYawDegrees);
         }
     }
 
@@ -338,7 +458,7 @@ public class HeadFireworkMod implements ModInitializer {
         double posY = rocket.getY();
         double posZ = rocket.getZ() + perpZ * offsetAmount;
 
-        LOGGER.info("HeadFirework: shape={}, targetScale={}, facing={}", shape, targetScale, cfg.facing);
+        LOGGER.info("HeadFirework: shape={}, targetScale={}, yawDegrees={}", shape, targetScale, yawDegrees);
         float startScale = targetScale * cfg.animationStartRatio;
 
         // load()が内部で座標・アイテムをリセットするため、先にtransformationを適用する(開始サイズで)

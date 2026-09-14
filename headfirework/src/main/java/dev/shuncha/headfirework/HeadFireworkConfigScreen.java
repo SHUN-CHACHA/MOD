@@ -16,6 +16,14 @@ public class HeadFireworkConfigScreen extends Screen {
     private static final int FADE_DURATION_MIN = 0;
     private static final int FADE_DURATION_MAX = 100;
     private static final String[] FACING_ORDER = {"north", "east", "south", "west"};
+    // 先頭のnullは「強制モードOFF」を表す
+    private static final String[] FORCE_FACING_ORDER = {null, "north", "east", "south", "west"};
+
+    // 全体のレイアウト基準(行の高さ・間隔)。ボタンが増えても画面上端が切れないよう詰めてある。
+    private static final int ROW_HEIGHT = 20;
+    private static final int ROW_GAP = 24;
+    private static final int CONTENT_TOP_OFFSET = 110;
+    private static final int TITLE_GAP = 20;
 
     private float smallBall;
     private float largeBall;
@@ -23,8 +31,10 @@ public class HeadFireworkConfigScreen extends Screen {
     private int displayDuration;
     private int fadeDuration;
     private String facing;
+    private String forceFacing;
 
     private Button facingButton;
+    private Button forceFacingButton;
 
     public HeadFireworkConfigScreen() {
         super(Component.literal("HeadFirework 設定"));
@@ -35,6 +45,7 @@ public class HeadFireworkConfigScreen extends Screen {
         this.displayDuration = cfg.displayDurationTicks;
         this.fadeDuration = cfg.fadeDurationTicks;
         this.facing = cfg.facing;
+        this.forceFacing = cfg.forceFacing;
     }
 
     @Override
@@ -42,40 +53,47 @@ public class HeadFireworkConfigScreen extends Screen {
         int centerX = this.width / 2;
         int sliderX = centerX - 110;
         int resetX = centerX + 95;
-        int y = this.height / 2 - 120;
+        int y = this.height / 2 - CONTENT_TOP_OFFSET;
 
         addScaleRow(sliderX, resetX, y, "小玉", smallBall,
                 value -> smallBall = value,
                 () -> smallBall = HeadFireworkConfig.DEFAULT_SCALE_SMALL_BALL);
-        y += 24;
+        y += ROW_GAP;
 
         addScaleRow(sliderX, resetX, y, "大玉", largeBall,
                 value -> largeBall = value,
                 () -> largeBall = HeadFireworkConfig.DEFAULT_SCALE_LARGE_BALL);
-        y += 24;
+        y += ROW_GAP;
 
         addScaleRow(sliderX, resetX, y, "星型/バースト", star,
                 value -> star = value,
                 () -> star = HeadFireworkConfig.DEFAULT_SCALE_STAR);
-        y += 24;
+        y += ROW_GAP;
 
         addDisplayDurationRow(sliderX, resetX, y);
-        y += 24;
+        y += ROW_GAP;
 
         addFadeDurationRow(sliderX, resetX, y);
-        y += 32;
+        y += ROW_GAP;
 
         facingButton = Button.builder(Component.literal(facingLabel()), button -> cycleFacing())
-                .bounds(centerX - 100, y, 200, 20)
+                .bounds(centerX - 100, y, 200, ROW_HEIGHT)
                 .build();
         this.addRenderableWidget(facingButton);
-        y += 32;
+        y += ROW_GAP;
+
+        // 強制モード: ONの間は参加者の個人設定(myface)を無視して全員この向きに統一する。
+        forceFacingButton = Button.builder(Component.literal(forceFacingLabel()), button -> cycleForceFacing())
+                .bounds(centerX - 100, y, 200, ROW_HEIGHT)
+                .build();
+        this.addRenderableWidget(forceFacingButton);
+        y += ROW_GAP;
 
         this.addRenderableWidget(Button.builder(Component.literal("適用"), button -> applyAndClose())
-                .bounds(centerX - 100, y, 95, 20)
+                .bounds(centerX - 100, y, 95, ROW_HEIGHT)
                 .build());
         this.addRenderableWidget(Button.builder(Component.literal("キャンセル"), button -> onClose())
-                .bounds(centerX + 5, y, 95, 20)
+                .bounds(centerX + 5, y, 95, ROW_HEIGHT)
                 .build());
     }
 
@@ -141,6 +159,33 @@ public class HeadFireworkConfigScreen extends Screen {
         }
     }
 
+    private String forceFacingLabel() {
+        if (forceFacing == null) {
+            return "強制モード: OFF(個人設定を優先)";
+        }
+        String jp = switch (forceFacing) {
+            case "north" -> "北";
+            case "east" -> "東";
+            case "west" -> "西";
+            default -> "南";
+        };
+        return "強制モード: " + jp + " (" + forceFacing + ") に統一";
+    }
+
+    private void cycleForceFacing() {
+        int currentIndex = 0;
+        for (int i = 0; i < FORCE_FACING_ORDER.length; i++) {
+            if (java.util.Objects.equals(FORCE_FACING_ORDER[i], forceFacing)) {
+                currentIndex = i;
+                break;
+            }
+        }
+        forceFacing = FORCE_FACING_ORDER[(currentIndex + 1) % FORCE_FACING_ORDER.length];
+        if (forceFacingButton != null) {
+            forceFacingButton.setMessage(Component.literal(forceFacingLabel()));
+        }
+    }
+
     private void applyAndClose() {
         sendConfigCommand("small_ball", smallBall);
         sendConfigCommand("large_ball", largeBall);
@@ -150,6 +195,7 @@ public class HeadFireworkConfigScreen extends Screen {
         sendIntCommand("display_duration", displayDuration);
         sendIntCommand("fade_duration", fadeDuration);
         sendFacingCommand(facing);
+        sendForceFacingCommand(forceFacing);
         onClose();
     }
 
@@ -177,10 +223,19 @@ public class HeadFireworkConfigScreen extends Screen {
         }
     }
 
+    private void sendForceFacingCommand(String direction) {
+        Minecraft client = Minecraft.getInstance();
+        if (client.player != null) {
+            String command = "headfirework config force_facing " + (direction != null ? direction : "off");
+            client.player.connection.sendCommand(command);
+        }
+    }
+
     @Override
     public void extractRenderState(GuiGraphicsExtractor extractor, int mouseX, int mouseY, float partialTick) {
         super.extractRenderState(extractor, mouseX, mouseY, partialTick);
-        extractor.centeredText(this.font, this.title, this.width / 2, this.height / 2 - 140, 0xFFFFFF);
+        int titleY = this.height / 2 - CONTENT_TOP_OFFSET - TITLE_GAP;
+        extractor.centeredText(this.font, this.title, this.width / 2, titleY, 0xFFFFFF);
     }
 
     @Override
