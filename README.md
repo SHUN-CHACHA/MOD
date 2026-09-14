@@ -1,4 +1,4 @@
-# SHUN-CHA's Minecraft Mods
+# SHUN-CHA's Minecraft Tools
 
 このリポジトリには、複数のMinecraft MOD/プラグイン/ツールのソースコードをまとめています。
 
