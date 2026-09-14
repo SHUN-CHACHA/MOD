@@ -1,0 +1,68 @@
+name: Release OreHighlighter
+
+# タグを push した時だけ動く。
+# 例: git tag orehighlighter-v2.1.4 && git push origin orehighlighter-v2.1.4
+# タグ名に "beta" を含むと、GitHub Releases 上でプレリリース(Pre-release)として作成される。
+
+on:
+  push:
+    tags:
+      - "orehighlighter-v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: orehighlighter
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG#orehighlighter-v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if [[ "$VERSION" == *beta* ]]; then
+            echo "is_beta=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_beta=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+          pip install -r requirements.txt
+
+      - name: Build EXE with PyInstaller
+        run: |
+          pyinstaller --onefile --windowed --name "OreHighlighter_v${{ steps.version.outputs.version }}" main.py
+
+      - name: Generate SHA256 checksum
+        run: |
+          cd dist
+          certutil -hashfile "OreHighlighter_v${{ steps.version.outputs.version }}.exe" SHA256 > "OreHighlighter_v${{ steps.version.outputs.version }}.exe.sha256.txt"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "OreHighlighter ${{ steps.version.outputs.version }}"
+          prerelease: ${{ steps.version.outputs.is_beta }}
+          generate_release_notes: true
+          files: |
+            orehighlighter/dist/OreHighlighter_v${{ steps.version.outputs.version }}.exe
+            orehighlighter/dist/OreHighlighter_v${{ steps.version.outputs.version }}.exe.sha256.txt
