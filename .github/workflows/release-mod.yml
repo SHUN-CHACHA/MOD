@@ -1,0 +1,72 @@
+name: Release MOD (headfirework)
+
+# タグを push した時だけ動く。
+# 例: git tag headfirework-v1.2.0-beta.1 && git push origin headfirework-v1.2.0-beta.1
+# タグ名に "beta" を含むと、GitHub Releases 上でプレリリース(Pre-release)として作成される。
+
+on:
+  push:
+    tags:
+      - "headfirework-v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: headfirework
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG#headfirework-v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if [[ "$VERSION" == *beta* ]]; then
+            echo "is_beta=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_beta=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      # gradle.properties にはローカルWindows環境専用のJDKパスが書かれているため、
+      # CI(Linux)では無効化してactions/setup-javaが用意したJDKを使わせる。
+      - name: Remove local java.home override (Windows-only setting)
+        run: sed -i '/org.gradle.java.home/d' gradle.properties
+
+      # Windows環境でcommitされたgradlewはCRLFになっている場合があるため念のため矯正
+      - name: Normalize gradlew line endings
+        run: sed -i 's/\r$//' gradlew
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build
+        run: ./gradlew build -Pmod_version=${{ steps.version.outputs.version }} --no-daemon
+
+      - name: Locate built jar
+        id: jar
+        run: |
+          JAR=$(ls build/libs/headfirework-*.jar | grep -v sources | head -n1)
+          echo "path=$JAR" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "HeadFirework (MOD) ${{ steps.version.outputs.version }}"
+          prerelease: ${{ steps.version.outputs.is_beta }}
+          generate_release_notes: true
+          files: headfirework/${{ steps.jar.outputs.path }}

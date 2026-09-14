@@ -1,0 +1,87 @@
+name: Release Paper Plugin (headfirework-paper)
+
+# タグを push した時だけ動く。
+# 例: git tag headfirework-paper-v1.0.1-beta.1 && git push origin headfirework-paper-v1.0.1-beta.1
+# タグ名に "beta" を含むと、GitHub Releases 上でプレリリース(Pre-release)として作成される。
+
+on:
+  push:
+    tags:
+      - "headfirework-paper-v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: headfirework-paper
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG#headfirework-paper-v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if [[ "$VERSION" == *beta* ]]; then
+            echo "is_beta=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_beta=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # このプロジェクトのGradle(8.7)はJDK25上では動かせないため、
+      # 「Gradle自体を動かすJDK17」と「コンパイル対象のJDK25(toolchain)」の
+      # 2つをインストールし、fromEnvでGradleに両方の場所を教える。
+      - name: Set up JDK 25 (for compile toolchain)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - name: Set up JDK 17 (runs Gradle itself)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # gradle.properties にはローカルWindows環境専用のJDKパスが書かれているため、
+      # CI(Linux)では無効化してactions/setup-javaが用意したJDK17を使わせる。
+      - name: Remove local java.home override (Windows-only setting)
+        run: sed -i '/org.gradle.java.home/d' gradle.properties
+
+      # build.gradle.kts はバージョンが "1.0.0" 固定になっているため、
+      # タグから取得したバージョンをビルド時だけ書き換える(コミットはしない)。
+      - name: Inject version from tag
+        run: |
+          sed -i "s/version = \"1.0.0\"/version = \"${{ steps.version.outputs.version }}\"/" build.gradle.kts
+
+      # Windows環境でcommitされたgradlewはCRLFになっている場合があるため念のため矯正
+      - name: Normalize gradlew line endings
+        run: sed -i 's/\r$//' gradlew
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build
+        run: ./gradlew build -Dorg.gradle.java.installations.fromEnv=JAVA_HOME_17_X64,JAVA_HOME_25_X64 --no-daemon
+
+      - name: Locate built jar
+        id: jar
+        run: |
+          JAR=$(ls build/libs/headfirework-paper-*.jar | grep -v sources | head -n1)
+          echo "path=$JAR" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "HeadFirework Paper Plugin ${{ steps.version.outputs.version }}"
+          prerelease: ${{ steps.version.outputs.is_beta }}
+          generate_release_notes: true
+          files: headfirework-paper/${{ steps.jar.outputs.path }}
